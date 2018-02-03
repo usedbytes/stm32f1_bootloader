@@ -96,47 +96,62 @@ static void setup_gpio(void) {
 	GPIOC_CRH |= (GPIO_MODE_OUTPUT_2_MHZ << ((13 - 8) * 4));
 }
 
+/*
+ * Helper to stream data into a series of packets.
+ *
+ * into:     should point to the first packet - which may alredy have been set
+ *           up with whatever header type is required.
+ * offset:   is the offset into the first packet where the data should start
+ *           (i.e. the size of the header for this packet type).
+ * type:     is used to set the packet type for all the packets.
+ *
+ * NOTE: There must be enough packets in the free-list to take all the data!
+ */
+static void packetise_stream(struct spi_pl_packet *into, uint8_t offset, uint8_t type, const char *data, uint32_t len)
+{
+	unsigned npkts = (len + offset + (SPI_PACKET_DATA_LEN - 1)) / SPI_PACKET_DATA_LEN;
+	unsigned int ndata = SPI_PACKET_DATA_LEN - offset;
+	uint8_t *p = into->data + offset;
+
+	while (npkts--) {
+		into->type = type;
+		into->nparts = npkts;
+
+		while (len && ndata) {
+			*p = *data;
+			p++; data++;
+			len--; ndata--;
+		}
+
+		spi_send_packet(into);
+
+		into = spi_alloc_packet();
+		if (!into) {
+			// Panic?
+			return;
+		}
+		p = into->data;
+		ndata = SPI_PACKET_DATA_LEN;
+	}
+}
+
 static void report_error(uint8_t id, const char *str)
 {
-	// len(str) + NUL + header, aligned up to packet size
-	unsigned npkts = (strlen(str) + 1 + 4 + (SPI_PACKET_DATA_LEN - 1)) / SPI_PACKET_DATA_LEN;
-	bool first = true;
+
+	struct error_pkt *err;
+	struct spi_pl_packet *pkt = spi_alloc_packet();
 
 	DEBUG("Report error: %d %s\r\n", id, str);
 
-	while (npkts--) {
-		uint8_t *p;
-		unsigned int ndata = SPI_PACKET_DATA_LEN;
-		struct spi_pl_packet *pkt = spi_alloc_packet();
-		if (!pkt) {
-			// panic?
-			return;
-		}
-
-		pkt->type = ERROR_PKT_TYPE;
-		pkt->nparts = npkts;
-		p = pkt->data;
-
-		if (first) {
-			struct error_pkt *err = (struct error_pkt *)pkt->data;
-			first = false;
-			err->id = id;
-			ndata -= 4;
-			p += 4;
-		}
-
-		while (*str && ndata) {
-			*p = *str;
-			p++; str++;
-			ndata--;
-		}
-
-		if (ndata) {
-			*p = *str;
-		}
-
-		spi_send_packet(pkt);
+	if (!pkt) {
+		// Panic?
+		return;
 	}
+
+	err = (struct error_pkt *)pkt->data;
+	err->id = id;
+
+	packetise_stream(pkt, 4, ERROR_PKT_TYPE, str, strlen(str) + 1);
 }
 
 static void process_sync_pkt(struct spi_pl_packet *pkt)
@@ -145,6 +160,7 @@ static void process_sync_pkt(struct spi_pl_packet *pkt)
 
 	if (pkt->nparts) {
 		report_error(pkt->id, "Unexpected nparts on sync pkt");
+		return;
 	}
 
 	pkt->id = 0;
