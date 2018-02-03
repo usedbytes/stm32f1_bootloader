@@ -211,7 +211,7 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 	resp_pl->len = payload->len;
 
 	crc_reset();
-	resp_pl->crc = crc_calculate_block((uint32_t *)payload->address, payload->len);
+	resp_pl->crc = crc_calculate_block((uint32_t *)payload->address, payload->len / 4);
 
 	DEBUG("CRC: %08lx\r\n", resp_pl->crc);
 	payload = NULL;
