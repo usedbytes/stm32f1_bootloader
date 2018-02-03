@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "spi.h"
+#include "usb_cdc.h"
 
 #include "systick.h"
 
@@ -51,8 +52,10 @@ static void ep1_process_packet(struct spi_pl_packet *pkt)
 
 	if (pkt->data[0]) {
 		gpio_set(GPIOC, GPIO13);
+		printf("_set()\r\n");
 	} else {
 		gpio_clear(GPIOC, GPIO13);
+		printf("_clear()\r\n");
 	}
 }
 
@@ -76,6 +79,8 @@ int main(void)
 
 	systick_init();
 	setup_gpio();
+
+	usb_cdc_init();
 
 	spi_init();
 	spi_slave_enable(SPI1);
