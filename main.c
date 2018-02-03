@@ -1,3 +1,4 @@
+#include <libopencm3/stm32/crc.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/spi.h>
@@ -50,7 +51,6 @@ struct write_pkt {
 struct readreq_pkt {
 	uint32_t address;
 	uint32_t len;
-	uint8_t data[0];
 };
 
 #define READRESP_PKT_TYPE 0x6
@@ -174,6 +174,52 @@ static void process_sync_pkt(struct spi_pl_packet *pkt)
 	spi_send_packet(pkt);
 }
 
+static void process_readreq_pkt(struct spi_pl_packet *pkt)
+{
+	struct spi_pl_packet *resp;
+	struct readresp_pkt *resp_pl;
+	struct readreq_pkt *payload = (struct readreq_pkt *)pkt->data;
+	if (pkt->nparts) {
+		report_error(pkt->id, "Unexpected nparts on readreq pkt");
+		return;
+	}
+
+	DEBUG("Read %ld bytes from %08lx\r\n", payload->len, payload->address);
+
+	if (payload->address & 0x3) {
+		report_error(pkt->id, "Read address must be word-aligned");
+		return;
+	}
+
+	if (payload->len & 0x3) {
+		report_error(pkt->id, "Read length must be word-aligned");
+		return;
+	}
+
+	// XXX: We could sanitise address and length
+
+	resp = spi_alloc_packet();
+	if (!resp) {
+		DEBUG("No packet for response\r\n");
+		// Panic?
+		return;
+	}
+
+	resp_pl = (struct readresp_pkt *)resp->data;
+	resp_pl->address = payload->address;
+	resp_pl->len = payload->len;
+
+	crc_reset();
+	resp_pl->crc = crc_calculate_block((uint32_t *)payload->address, payload->len);
+
+	DEBUG("CRC: %08lx\r\n", resp_pl->crc);
+	payload = NULL;
+	spi_free_packet(pkt);
+
+	packetise_stream(resp, offsetof(struct readresp_pkt, data), READRESP_PKT_TYPE, (char *)resp_pl->address, resp_pl->len);
+}
+
+
 static void ep0xfe_process_packet(struct spi_pl_packet *pkt)
 {
 	if ((pkt->type != 0xfe) || (pkt->flags & SPI_FLAG_ERROR))
@@ -192,6 +238,7 @@ int main(void)
 	rcc_periph_clock_enable(RCC_AFIO);
 	rcc_periph_clock_enable(RCC_SPI1);
 	rcc_periph_clock_enable(RCC_DMA1);
+	rcc_periph_clock_enable(RCC_CRC);
 
 	systick_init();
 	setup_gpio();
@@ -229,6 +276,9 @@ int main(void)
 					break;
 				case SYNC_PKT_TYPE:
 					process_sync_pkt(pkt);
+					break;
+				case READREQ_PKT_TYPE:
+					process_readreq_pkt(pkt);
 					break;
 				case 0xfe:
 					ep0xfe_process_packet(pkt);
