@@ -125,13 +125,15 @@ static void packetise_stream(struct spi_pl_packet *into, uint8_t offset, uint8_t
 
 		spi_send_packet(into);
 
-		into = spi_alloc_packet();
-		if (!into) {
-			// Panic?
-			return;
+		if (npkts) {
+			into = spi_alloc_packet();
+			if (!into) {
+				DEBUG("Panic (packetise)\r\n");
+				return;
+			}
+			p = into->data;
+			ndata = SPI_PACKET_DATA_LEN;
 		}
-		p = into->data;
-		ndata = SPI_PACKET_DATA_LEN;
 	}
 }
 
