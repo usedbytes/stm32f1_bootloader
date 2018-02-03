@@ -146,7 +146,7 @@ static void report_error(uint8_t id, const char *str)
 	DEBUG("Report error: %d %s\r\n", id, str);
 
 	if (!pkt) {
-		// Panic?
+		DEBUG("Panic (error)\r\n");
 		return;
 	}
 
@@ -203,7 +203,6 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 	resp = spi_alloc_packet();
 	if (!resp) {
 		DEBUG("No packet for response\r\n");
-		// Panic?
 		return;
 	}
 
