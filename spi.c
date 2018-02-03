@@ -31,7 +31,7 @@
 #define SPI1_RX_DMA 2
 #define SPI1_TX_DMA 3
 
-#define SPI_N_PACKETS 8
+#define SPI_N_PACKETS 32
 
 #define DEBUG
 #ifdef DEBUG
