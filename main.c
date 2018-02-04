@@ -162,6 +162,7 @@ static void process_sync_pkt(struct spi_pl_packet *pkt)
 
 	if (pkt->nparts) {
 		report_error(pkt->id, "Unexpected nparts on sync pkt");
+		spi_free_packet(pkt);
 		return;
 	}
 
@@ -183,6 +184,7 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 	struct readreq_pkt *payload = (struct readreq_pkt *)pkt->data;
 	if (pkt->nparts) {
 		report_error(pkt->id, "Unexpected nparts on readreq pkt");
+		spi_free_packet(pkt);
 		return;
 	}
 
@@ -190,11 +192,13 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 
 	if (payload->address & 0x3) {
 		report_error(pkt->id, "Read address must be word-aligned");
+		spi_free_packet(pkt);
 		return;
 	}
 
 	if (payload->len & 0x3) {
 		report_error(pkt->id, "Read length must be word-aligned");
+		spi_free_packet(pkt);
 		return;
 	}
 
@@ -203,6 +207,7 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 	resp = spi_alloc_packet();
 	if (!resp) {
 		DEBUG("No packet for response\r\n");
+		spi_free_packet(pkt);
 		return;
 	}
 
