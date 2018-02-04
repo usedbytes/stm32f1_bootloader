@@ -80,6 +80,7 @@ struct go_pkt {
 
 #define QUERY_PKT_TYPE 0x8
 #define QUERY_PARAM_MAX_TRANSFER 0x1
+#define QUERY_PARAM_DEFAULT_USER_ADDR 0x2
 struct query_pkt {
 	uint32_t parameter;
 };
@@ -450,6 +451,9 @@ static void process_query_pkt(struct spi_pl_packet *pkt)
 		case QUERY_PARAM_MAX_TRANSFER:
 			value = MAX_TRANSFER;
 			break;
+		case QUERY_PARAM_DEFAULT_USER_ADDR:
+			value = DEFAULT_USER_ADDR;
+			break;
 		default:
 			report_error(pkt->id, "Unknown query.");
 			spi_free_packet(pkt);
@@ -511,8 +515,14 @@ int main(void)
 
 	struct spi_pl_packet *pkt;
 	uint32_t time = msTicks;
+
+	bool booting = true;
+	int countdown = 20;
 	while (1) {
 		while ((pkt = spi_receive_packet())) {
+
+			booting = false;
+
 			if (pkt->flags & SPI_FLAG_CRCERR) {
 				report_error(pkt->id, "CRC Error.");
 				spi_free_packet(pkt);
@@ -550,9 +560,15 @@ int main(void)
 			}
 		}
 
-		if (msTicks > time + 300) {
+		if (msTicks > time + 100) {
 			gpio_toggle(GPIOC, GPIO13);
-			time = msTicks + 300;
+			time = msTicks + 100;
+			if (booting) {
+				countdown--;
+				if (!countdown && checkUserCode(DEFAULT_USER_ADDR)) {
+					jumpToUser(DEFAULT_USER_ADDR);
+				}
+			}
 		}
 	}
 
