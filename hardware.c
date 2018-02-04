@@ -67,17 +67,16 @@ static void setMspAndJump(uint32_t usrAddr) {
 	// Dedicated function with no call to any function (appart the last call)
 	// This way, there is no manipulation of the stack here, ensuring that GGC
 	// didn't insert any pop from the SP after having set the MSP.
-	typedef void (*funcPtr)(void);
 	uint32_t jumpAddr = *(volatile uint32_t *)(usrAddr + 0x04); /* reset ptr in vector table */
-
-	funcPtr usrMain = (funcPtr) jumpAddr;
 
 	SCB_VTOR = (volatile uint32_t) (usrAddr);
 
 	asm volatile("msr msp, %0"::"g"
 			(*(volatile uint32_t *)usrAddr));
 
-	usrMain();                                /* go! */
+	// Inline asm branch, because otherwise the compiler was doing something
+	// weird (ldmia.w) which was causing us to take an abort
+	asm volatile("bx %0"::"r" (jumpAddr));
 }
 
 static void usbPowerOff(void) {
