@@ -267,6 +267,117 @@ static void process_erase_pkt(struct spi_pl_packet *pkt)
 	spi_send_packet(pkt);
 }
 
+static inline uint32_t min(uint32_t a, uint32_t b) {
+	return a < b ? a : b;
+}
+
+static void process_write_pkt(struct spi_pl_packet *pkt)
+{
+	static uint8_t *dst;
+	static uint32_t data_words[128];
+	static struct spi_pl_packet *start = NULL;
+	static struct write_pkt *payload;
+	static uint32_t len;
+	uint8_t *src;
+	uint32_t tocopy;
+
+	if (!start) {
+		payload = (struct write_pkt *)pkt->data;
+
+		uint32_t flash_end;
+		unsigned nparts = (payload->len + 12) / SPI_PACKET_DATA_LEN;
+		if (nparts != pkt->nparts) {
+			DEBUG("Expected nparts %d, got %d\r\n", nparts, pkt->nparts);
+			report_error(pkt->id, "Unexpected nparts on write pkt");
+			goto cleanup;
+		}
+
+		if (payload->len > 512) {
+			report_error(pkt->id, "Write request too long.");
+			goto cleanup;
+		}
+
+		flash_end = 0x08000000 + ((DESIG_FLASH_SIZE) << 10);
+		if (payload->address + payload->len > flash_end) {
+			report_error(pkt->id, "Write address outside flash!");
+			goto cleanup;
+		}
+
+		start = pkt;
+		pkt = NULL; /* Make sure we don't double-free pkt in the error path */
+		dst = (uint8_t *)data_words;
+		len = payload->len;
+
+		tocopy = min(len, SPI_PACKET_DATA_LEN - 12);
+		src = start->data + 12;
+	} else {
+		if (pkt->nparts != start->nparts) {
+			report_error(pkt->id, "Unexpected nparts.");
+			goto cleanup;
+
+		}
+		src = pkt->data;
+		tocopy = min(len, SPI_PACKET_DATA_LEN);
+	}
+
+	DEBUG("Copy %ld bytes from %p to %p\r\n", tocopy, src, dst);
+	memcpy(dst, src, tocopy);
+	len -= tocopy;
+	dst += tocopy;
+
+	if (!start->nparts) {
+		if (len != 0) {
+			report_error(pkt->id, "Expected to be finished.");
+			goto cleanup;
+		}
+
+		crc_reset();
+		uint32_t flags, crc = crc_calculate_block(data_words, payload->len / 4);
+		DEBUG("Calculated CRC %08lx\r\n", crc);
+		if (crc != payload->crc) {
+			report_error(pkt->id, "Write integrity error.");
+			goto cleanup;
+		}
+
+		flash_unlock();
+		for (len = 0; len < payload->len / 4; len++, payload->address += 4) {
+			flash_program_word(payload->address, data_words[len]);
+		}
+		flags = flash_get_status_flags();
+		flash_lock();
+
+		if (flags & (FLASH_SR_PGERR | FLASH_SR_WRPRTERR)) {
+			report_error(start->id, "Flash program error.");
+			goto cleanup;
+		}
+
+		if (!pkt) {
+			pkt = spi_alloc_packet();
+			if (!pkt) {
+				DEBUG("Panic (Write ack)\r\n");
+			}
+		}
+		memset(pkt, 0, sizeof(*pkt));
+		pkt->type = ACK_PKT_TYPE;
+		spi_send_packet(pkt);
+		pkt = NULL;
+		goto cleanup;
+	}
+
+	start->nparts--;
+	spi_free_packet(pkt);
+	return;
+
+cleanup:
+	if (start) {
+		spi_free_packet(start);
+		start = NULL;
+	}
+	if (pkt) {
+		spi_free_packet(pkt);
+	}
+}
+
 static void ep0xfe_process_packet(struct spi_pl_packet *pkt)
 {
 	if ((pkt->type != 0xfe) || (pkt->flags & SPI_FLAG_ERROR))
@@ -330,10 +441,14 @@ int main(void)
 				case ERASE_PKT_TYPE:
 					process_erase_pkt(pkt);
 					break;
+				case WRITE_PKT_TYPE:
+					process_write_pkt(pkt);
+					break;
 				case 0xfe:
 					ep0xfe_process_packet(pkt);
 					break;
 				default:
+					DEBUG("Unknown type %d\n", pkt->type);
 					report_error(pkt->id, "Unknown type. But lets make this error.");
 					spi_free_packet(pkt);
 			}
