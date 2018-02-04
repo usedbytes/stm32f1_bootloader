@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "hardware.h"
 #include "spi.h"
 #include "usb_cdc.h"
 
@@ -66,6 +67,11 @@ struct readresp_pkt {
 	uint32_t len;
 	uint32_t crc;
 	uint8_t data[0];
+};
+
+#define GO_PKT_TYPE 0x7
+struct go_pkt {
+	uint32_t address;
 };
 
 static void setup_irq_priorities(void)
@@ -383,6 +389,33 @@ cleanup:
 	}
 }
 
+static void process_go_pkt(struct spi_pl_packet *pkt)
+{
+	struct go_pkt *payload = (struct go_pkt *)pkt->data;
+	if (pkt->nparts) {
+		DBG_PRINT("bad nparts\r\n");
+		report_error(pkt->id, "Unexpected nparts on erase pkt.");
+		spi_free_packet(pkt);
+		return;
+	}
+
+	DBG_PRINT("Jump to %08lx.\r\n", payload->address);
+
+	if (!checkUserCode(payload->address)) {
+		report_error(pkt->id, "Jump target looks dubious.");
+		spi_free_packet(pkt);
+		scb_reset_system();
+		return;
+	}
+
+
+	DBG_PRINT("Validated, jumping.\r\n");
+
+	jumpToUser(payload->address);
+
+	return;
+}
+
 static void ep0xfe_process_packet(struct spi_pl_packet *pkt)
 {
 	if ((pkt->type != 0xfe) || (pkt->flags & SPI_FLAG_ERROR))
@@ -449,6 +482,9 @@ int main(void)
 				case WRITE_PKT_TYPE:
 					process_write_pkt(pkt);
 					break;
+				case GO_PKT_TYPE:
+					process_go_pkt(pkt);
+					break;
 				case 0xfe:
 					ep0xfe_process_packet(pkt);
 					break;
@@ -457,6 +493,11 @@ int main(void)
 					report_error(pkt->id, "Unknown type. But lets make this error.");
 					spi_free_packet(pkt);
 			}
+		}
+
+		if (msTicks > time + 300) {
+			gpio_toggle(GPIOC, GPIO13);
+			time = msTicks + 300;
 		}
 	}
 
