@@ -15,6 +15,8 @@
 
 #include "systick.h"
 
+#define MAX_TRANSFER 512
+
 #define DEBUG
 #ifdef DEBUG
 #define DBG_PRINT(...) printf(__VA_ARGS__)
@@ -72,6 +74,18 @@ struct readresp_pkt {
 #define GO_PKT_TYPE 0x7
 struct go_pkt {
 	uint32_t address;
+};
+
+#define QUERY_PKT_TYPE 0x8
+#define QUERY_PARAM_MAX_TRANSFER 0x1
+struct query_pkt {
+	uint32_t parameter;
+};
+
+#define QUERYRESP_PKT_TYPE 0x9
+struct queryresp_pkt {
+	uint32_t parameter;
+	uint32_t value;
 };
 
 static void setup_irq_priorities(void)
@@ -285,7 +299,7 @@ static inline uint32_t min(uint32_t a, uint32_t b) {
 static void process_write_pkt(struct spi_pl_packet *pkt)
 {
 	static uint8_t *dst;
-	static uint32_t data_words[128];
+	static uint32_t data_words[MAX_TRANSFER / 4];
 	static struct spi_pl_packet *start = NULL;
 	static struct write_pkt *payload;
 	static uint32_t len;
@@ -303,7 +317,7 @@ static void process_write_pkt(struct spi_pl_packet *pkt)
 			goto cleanup;
 		}
 
-		if (payload->len > 512) {
+		if (payload->len > MAX_TRANSFER) {
 			report_error(pkt->id, "Write request too long.");
 			goto cleanup;
 		}
@@ -416,6 +430,40 @@ static void process_go_pkt(struct spi_pl_packet *pkt)
 	return;
 }
 
+static void process_query_pkt(struct spi_pl_packet *pkt)
+{
+	struct query_pkt *payload = (struct query_pkt *)pkt->data;
+	struct queryresp_pkt *resp = (struct queryresp_pkt *)pkt->data;
+	uint32_t parameter, value;
+	if (pkt->nparts) {
+		report_error(pkt->id, "Unexpected nparts on query pkt");
+		spi_free_packet(pkt);
+		return;
+	}
+
+	parameter = payload->parameter;
+	DBG_PRINT("Query %ld.\r\n", parameter);
+
+	switch (parameter) {
+		case QUERY_PARAM_MAX_TRANSFER:
+			value = MAX_TRANSFER;
+			break;
+		default:
+			report_error(pkt->id, "Unknown query.");
+			spi_free_packet(pkt);
+			return;
+	}
+
+	DBG_PRINT("Response %ld : %ld.\r\n", parameter, value);
+
+	memset(pkt, 0, sizeof(*pkt));
+	pkt->type = QUERYRESP_PKT_TYPE;
+	resp->parameter = parameter;
+	resp->value = value;
+	spi_send_packet(pkt);
+}
+
+
 static void ep0xfe_process_packet(struct spi_pl_packet *pkt)
 {
 	if ((pkt->type != 0xfe) || (pkt->flags & SPI_FLAG_ERROR))
@@ -484,6 +532,9 @@ int main(void)
 					break;
 				case GO_PKT_TYPE:
 					process_go_pkt(pkt);
+					break;
+				case QUERY_PKT_TYPE:
+					process_query_pkt(pkt);
 					break;
 				case 0xfe:
 					ep0xfe_process_packet(pkt);
