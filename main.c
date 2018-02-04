@@ -7,17 +7,19 @@
 #include <libopencm3/stm32/desig.h>
 #include <libopencm3/stm32/flash.h>
 #include <string.h>
-#include <stdio.h>
 
 #include "hardware.h"
 #include "spi.h"
+#ifdef DEBUG
+#include <stdio.h>
 #include "usb_cdc.h"
+#endif
 
 #include "systick.h"
 
 #define MAX_TRANSFER 512
+#define DEFAULT_USER_ADDR 0x08002000
 
-#define DEBUG
 #ifdef DEBUG
 #define DBG_PRINT(...) printf(__VA_ARGS__)
 #else
@@ -487,7 +489,9 @@ int main(void)
 	systick_init();
 	setup_gpio();
 
+#ifdef DEBUG
 	usb_cdc_init();
+#endif
 
 	spi_init();
 	spi_slave_enable(SPI1);
