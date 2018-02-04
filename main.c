@@ -4,6 +4,8 @@
 #include <libopencm3/stm32/spi.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/scb.h>
+#include <libopencm3/stm32/desig.h>
+#include <libopencm3/stm32/flash.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -225,6 +227,45 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 	packetise_stream(resp, offsetof(struct readresp_pkt, data), READRESP_PKT_TYPE, (char *)resp_pl->address, resp_pl->len);
 }
 
+static void process_erase_pkt(struct spi_pl_packet *pkt)
+{
+	struct erase_pkt *payload = (struct erase_pkt *)pkt->data;
+	uint32_t flags, flash_end;
+	if (pkt->nparts) {
+		report_error(pkt->id, "Unexpected nparts on erase pkt");
+		spi_free_packet(pkt);
+		return;
+	}
+
+	DEBUG("Erase page at %08lx\r\n", payload->address);
+
+	if (payload->address & (1024 - 1)) {
+		report_error(pkt->id, "Erase address must be 1 kB aligned.");
+		spi_free_packet(pkt);
+		return;
+	}
+
+	flash_end = 0x08000000 + ((DESIG_FLASH_SIZE - 1) << 10);
+	if (payload->address > flash_end) {
+		report_error(pkt->id, "Erase address outside flash!");
+		spi_free_packet(pkt);
+		return;
+	}
+
+	flash_unlock();
+	flash_erase_page(payload->address);
+	flags = flash_get_status_flags();
+	flash_lock();
+
+	if (flags & (FLASH_SR_PGERR | FLASH_SR_WRPRTERR)) {
+		report_error(pkt->id, "Flash erase error.");
+		spi_free_packet(pkt);
+		return;
+	}
+
+	pkt->type = ACK_PKT_TYPE;
+	spi_send_packet(pkt);
+}
 
 static void ep0xfe_process_packet(struct spi_pl_packet *pkt)
 {
@@ -285,6 +326,9 @@ int main(void)
 					break;
 				case READREQ_PKT_TYPE:
 					process_readreq_pkt(pkt);
+					break;
+				case ERASE_PKT_TYPE:
+					process_erase_pkt(pkt);
 					break;
 				case 0xfe:
 					ep0xfe_process_packet(pkt);
