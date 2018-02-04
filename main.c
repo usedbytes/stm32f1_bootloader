@@ -14,7 +14,12 @@
 
 #include "systick.h"
 
-#define DEBUG(...) printf(__VA_ARGS__)
+#define DEBUG
+#ifdef DEBUG
+#define DBG_PRINT(...) printf(__VA_ARGS__)
+#else
+#define DBG_PRINT(...) {}
+#endif
 
 #define ERROR_PKT_TYPE 0xff
 struct error_pkt {
@@ -130,7 +135,7 @@ static void packetise_stream(struct spi_pl_packet *into, uint8_t offset, uint8_t
 		if (npkts) {
 			into = spi_alloc_packet();
 			if (!into) {
-				DEBUG("Panic (packetise)\r\n");
+				DBG_PRINT("Panic (packetise)\r\n");
 				return;
 			}
 			p = into->data;
@@ -145,10 +150,10 @@ static void report_error(uint8_t id, const char *str)
 	struct error_pkt *err;
 	struct spi_pl_packet *pkt = spi_alloc_packet();
 
-	DEBUG("Report error: %d %s\r\n", id, str);
+	DBG_PRINT("Report error: %d %s\r\n", id, str);
 
 	if (!pkt) {
-		DEBUG("Panic (error)\r\n");
+		DBG_PRINT("Panic (error)\r\n");
 		return;
 	}
 
@@ -190,7 +195,7 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 		return;
 	}
 
-	DEBUG("Read %ld bytes from %08lx\r\n", payload->len, payload->address);
+	DBG_PRINT("Read %ld bytes from %08lx\r\n", payload->len, payload->address);
 
 	if (payload->address & 0x3) {
 		report_error(pkt->id, "Read address must be word-aligned");
@@ -208,7 +213,7 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 
 	resp = spi_alloc_packet();
 	if (!resp) {
-		DEBUG("No packet for response\r\n");
+		DBG_PRINT("No packet for response\r\n");
 		spi_free_packet(pkt);
 		return;
 	}
@@ -220,7 +225,7 @@ static void process_readreq_pkt(struct spi_pl_packet *pkt)
 	crc_reset();
 	resp_pl->crc = crc_calculate_block((uint32_t *)payload->address, payload->len / 4);
 
-	DEBUG("CRC: %08lx\r\n", resp_pl->crc);
+	DBG_PRINT("CRC: %08lx\r\n", resp_pl->crc);
 	payload = NULL;
 	spi_free_packet(pkt);
 
@@ -237,7 +242,7 @@ static void process_erase_pkt(struct spi_pl_packet *pkt)
 		return;
 	}
 
-	DEBUG("Erase page at %08lx\r\n", payload->address);
+	DBG_PRINT("Erase page at %08lx\r\n", payload->address);
 
 	if (payload->address & (1024 - 1)) {
 		report_error(pkt->id, "Erase address must be 1 kB aligned.");
@@ -287,7 +292,7 @@ static void process_write_pkt(struct spi_pl_packet *pkt)
 		uint32_t flash_end;
 		unsigned nparts = (payload->len + 12) / SPI_PACKET_DATA_LEN;
 		if (nparts != pkt->nparts) {
-			DEBUG("Expected nparts %d, got %d\r\n", nparts, pkt->nparts);
+			DBG_PRINT("Expected nparts %d, got %d\r\n", nparts, pkt->nparts);
 			report_error(pkt->id, "Unexpected nparts on write pkt");
 			goto cleanup;
 		}
@@ -320,7 +325,7 @@ static void process_write_pkt(struct spi_pl_packet *pkt)
 		tocopy = min(len, SPI_PACKET_DATA_LEN);
 	}
 
-	DEBUG("Copy %ld bytes from %p to %p\r\n", tocopy, src, dst);
+	DBG_PRINT("Copy %ld bytes from %p to %p\r\n", tocopy, src, dst);
 	memcpy(dst, src, tocopy);
 	len -= tocopy;
 	dst += tocopy;
@@ -333,7 +338,7 @@ static void process_write_pkt(struct spi_pl_packet *pkt)
 
 		crc_reset();
 		uint32_t flags, crc = crc_calculate_block(data_words, payload->len / 4);
-		DEBUG("Calculated CRC %08lx\r\n", crc);
+		DBG_PRINT("Calculated CRC %08lx\r\n", crc);
 		if (crc != payload->crc) {
 			report_error(pkt->id, "Write integrity error.");
 			goto cleanup;
@@ -354,7 +359,7 @@ static void process_write_pkt(struct spi_pl_packet *pkt)
 		if (!pkt) {
 			pkt = spi_alloc_packet();
 			if (!pkt) {
-				DEBUG("Panic (Write ack)\r\n");
+				DBG_PRINT("Panic (Write ack)\r\n");
 			}
 		}
 		memset(pkt, 0, sizeof(*pkt));
@@ -448,7 +453,7 @@ int main(void)
 					ep0xfe_process_packet(pkt);
 					break;
 				default:
-					DEBUG("Unknown type %d\n", pkt->type);
+					DBG_PRINT("Unknown type %d\n", pkt->type);
 					report_error(pkt->id, "Unknown type. But lets make this error.");
 					spi_free_packet(pkt);
 			}
