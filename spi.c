@@ -205,7 +205,13 @@ static void receive_packet(struct spi_pl_packet *pkt)
 	if (status & SPI_SR_CRCERR) {
 		pkt->flags |= SPI_FLAG_CRCERR;
 	}
-	spi_add_last(&packet_inbox, pkt);
+
+	if (pkt->type == 0) {
+		/* Immediately release any filler packets. */
+		spi_free_packet(pkt);
+	} else {
+		spi_add_last(&packet_inbox, pkt);
+	}
 }
 
 static void finish_rx(void)
