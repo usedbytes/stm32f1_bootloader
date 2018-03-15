@@ -129,7 +129,12 @@ static void prepare_tx(void)
 	 * Preload the data register, so we transmit the ID while setting
 	 * up the DMA
 	 */
-	SPI_DR(SPI1) = id++;
+	SPI_DR(SPI1) = id;
+
+	id++;
+	if (id >= 0x80) {
+		id = 0;
+	}
 }
 
 static void start_tx(void)
