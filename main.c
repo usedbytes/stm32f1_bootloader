@@ -313,7 +313,7 @@ static void process_write_pkt(struct spi_pl_packet *pkt)
 		payload = (struct write_pkt *)pkt->data;
 
 		uint32_t flash_end;
-		unsigned nparts = (payload->len + 12) / SPI_PACKET_DATA_LEN;
+		unsigned nparts = (payload->len + 12 - 1) / SPI_PACKET_DATA_LEN;
 		if (nparts != pkt->nparts) {
 			DBG_PRINT("Expected nparts %d, got %d\r\n", nparts, pkt->nparts);
 			report_error(pkt->id, "Unexpected nparts on write pkt");
